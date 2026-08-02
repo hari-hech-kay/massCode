@@ -68,10 +68,12 @@ onMounted(async () => {
   }, 60_000)
 
   try {
-    const payload = await ipc.invoke<null, CurrencyRatesPayload>(
-      'system:currency-rates',
-      null,
-    )
+    const payload = {
+      rates: {},
+      fetchedAt: 0,
+      source: 'unavailable',
+    }
+    
     if (payload.source === 'unavailable') {
       setCurrencyServiceState(
         'unavailable',
