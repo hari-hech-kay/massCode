@@ -16,8 +16,15 @@ import {
 } from '@/utils/normalizeTerminalText'
 import { useClipboard, useCssVar, useDebounceFn } from '@vueuse/core'
 import CodeMirror from 'codemirror'
+import 'codemirror/addon/dialog/dialog'
+import 'codemirror/addon/dialog/dialog.css'
 import 'codemirror/addon/edit/closebrackets'
 import 'codemirror/addon/edit/matchbrackets'
+import 'codemirror/addon/fold/brace-fold'
+import 'codemirror/addon/fold/comment-fold'
+import 'codemirror/addon/fold/foldcode'
+import 'codemirror/addon/fold/foldgutter'
+import 'codemirror/addon/fold/foldgutter.css'
 import 'codemirror/addon/search/search'
 import 'codemirror/addon/search/searchcursor'
 import 'codemirror/addon/selection/active-line'
@@ -123,6 +130,24 @@ const hideScrollbar = useDebounceFn(() => {
   scrollBarOpacity.value = '0'
 }, 1000)
 
+function openEditorSearch() {
+  isFocusedSearch.value = true
+
+  if (!editor)
+    return
+
+  editor.focus()
+  CodeMirror.commands.findPersistent(editor)
+}
+
+function openEditorReplace() {
+  if (!editor)
+    return
+
+  editor.focus()
+  CodeMirror.commands.replace(editor)
+}
+
 async function init() {
   const el = document.getElementById('editor')
 
@@ -141,6 +166,8 @@ async function init() {
     autoCloseBrackets: true,
     matchBrackets: settings.matchBrackets,
     styleActiveLine: settings.highlightLine,
+    foldGutter: true,
+    gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
     scrollbarStyle: 'null',
   })
 
@@ -213,9 +240,10 @@ async function init() {
   })
 
   editor.setOption('extraKeys', {
-    'Cmd-F': () => {
-      isFocusedSearch.value = true
-    },
+    'Cmd-F': openEditorSearch,
+    'Ctrl-F': openEditorSearch,
+    'Cmd-Alt-F': openEditorReplace,
+    'Ctrl-Alt-F': openEditorReplace,
   })
 
   ipc.on('main-menu:copy-snippet', onCopySnippetMenu)
