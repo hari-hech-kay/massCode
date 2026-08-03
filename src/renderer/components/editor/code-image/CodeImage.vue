@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import type { Language } from '../types'
+import { createCodeHighlight } from '@/components/cm-extensions/codeHighlight'
 import { Switch } from '@/components/ui/shadcn/switch'
 import { useEditor, useSnippets } from '@/composables'
 import { i18n } from '@/electron'
+import { LanguageDescription } from '@codemirror/language'
+import { languages } from '@codemirror/language-data'
+import { Compartment, EditorState } from '@codemirror/state'
+
+import { EditorView, lineNumbers } from '@codemirror/view'
 import { useCssVar } from '@vueuse/core'
-import CodeMirror from 'codemirror'
 import domToImage from 'dom-to-image'
 import interact from 'interactjs'
 import { FileDown } from 'lucide-vue-next'
@@ -14,10 +19,9 @@ const { selectedSnippetContent, selectedSnippet } = useSnippets()
 const MIN_WIDTH = 520
 const MAX_WIDTH = 920
 
-const { settings, cursorPosition: _cursorPosition } = useEditor()
+const { settings } = useEditor()
 
 const activeBackground = ref('disco')
-
 const isDarkPreview = ref(true)
 const isBackground = ref(true)
 
@@ -26,7 +30,6 @@ const containerRef = useTemplateRef('containerRef')
 const backgroundRef = useTemplateRef('backgroundRef')
 
 const width = ref(MIN_WIDTH)
-
 const isDragging = ref(false)
 const showDimensions = ref(false)
 
@@ -38,33 +41,68 @@ const colorBorder = useCssVar('--color-code-bg-border', backgroundRef.value, {
   initialValue: 'oklch(30% 0 0)',
 })
 
-let editor: CodeMirror.Editor | null = null
+let view: EditorView | null = null
 
-function init() {
-  editor = CodeMirror(editorRef.value!, {
-    value: selectedSnippetContent.value?.value || ' ',
-    mode: selectedSnippetContent.value?.language || 'plain_text',
-    theme: 'oceanic-next',
-    lineWrapping: settings.wrap,
-    lineNumbers: true,
-    matchBrackets: settings.matchBrackets,
-    scrollbarStyle: 'null',
-    readOnly: true,
+const languageConf = new Compartment()
+const themeConf = new Compartment()
+
+async function loadLanguage(lang: string | undefined) {
+  if (!lang || lang === 'plain_text')
+    return null
+  const desc = LanguageDescription.matchLanguageName(languages, lang, true)
+  if (desc) {
+    return await desc.load()
+  }
+  return null
+}
+
+const baseTheme = EditorView.theme({
+  '&': {
+    backgroundColor: 'transparent',
+    color: 'var(--foreground)',
+  },
+  '.cm-content': {
+    fontFamily: 'var(--editor-font-family)',
+    fontSize: 'var(--editor-font-size)',
+    lineHeight: 'calc(var(--editor-font-size) * 1.5)',
+  },
+  '.cm-gutters': {
+    backgroundColor: 'transparent',
+    color: 'var(--muted-foreground)',
+    border: 'none',
+  },
+})
+
+async function init() {
+  const initialLang = selectedSnippetContent.value?.language || 'plain_text'
+  const langSupport = await loadLanguage(initialLang)
+
+  view = new EditorView({
+    state: EditorState.create({
+      doc: selectedSnippetContent.value?.value || ' ',
+      extensions: [
+        baseTheme,
+        themeConf.of(createCodeHighlight(isDarkPreview.value)),
+        languageConf.of(langSupport ? [langSupport] : []),
+        lineNumbers(),
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+        settings.wrap ? EditorView.lineWrapping : [],
+      ],
+    }),
+    parent: editorRef.value!,
   })
 
-  // Отключаем выделение текста
-  editor.on('mousedown', (e) => {
-    // @ts-expect-error some
+  // Prevent text selection by preventing default on mousedown in the editor
+  editorRef.value?.addEventListener('mousedown', (e) => {
     e.preventDefault()
   })
 
   watch(selectedSnippetContent, (v) => {
     nextTick(() => {
-      // Тело фрагмента ещё загружается — не мигаем пустым изображением.
       if (v && v.value === undefined) {
         return
       }
-
       setValue(v?.value || '')
     })
   })
@@ -78,18 +116,11 @@ function init() {
   })
 
   watch(isDarkPreview, (v) => {
-    if (v) {
-      editor?.setOption('theme', 'oceanic-next')
-    }
-    else {
-      editor?.setOption('theme', 'neo')
-    }
-    colorBg.value = isDarkPreview.value
-      ? 'oklch(24.78% 0 0)'
-      : 'oklch(100% 0 0)'
-    colorBorder.value = isDarkPreview.value
-      ? 'oklch(30% 0 0)'
-      : 'oklch(90% 0 0)'
+    view?.dispatch({
+      effects: themeConf.reconfigure(createCodeHighlight(v)),
+    })
+    colorBg.value = v ? 'oklch(24.78% 0 0)' : 'oklch(100% 0 0)'
+    colorBorder.value = v ? 'oklch(30% 0 0)' : 'oklch(90% 0 0)'
   })
 
   nextTick(() => {
@@ -128,9 +159,7 @@ function initInteract() {
         showDimensions.value = true
       },
       move(event) {
-        // Учитываем эффект центрирования, удваивая изменение размера
         let newWidth = width.value + event.deltaRect.width * 2
-
         newWidth = Math.max(MIN_WIDTH, Math.min(newWidth, containerMaxWidth))
         width.value = newWidth
       },
@@ -143,19 +172,23 @@ function initInteract() {
 }
 
 function setValue(value: string) {
-  if (!editor)
+  if (!view)
     return
-
-  const cursor = editor.getCursor()
-
-  editor?.setValue(value)
-
-  if (cursor)
-    editor.setCursor(cursor)
+  const current = view.state.doc.toString()
+  if (current === value)
+    return
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: value },
+  })
 }
 
-function setLanguage(language: Language) {
-  editor?.setOption('mode', language)
+async function setLanguage(language: Language) {
+  if (!view)
+    return
+  const langSupport = await loadLanguage(language)
+  view.dispatch({
+    effects: languageConf.reconfigure(langSupport ? [langSupport] : []),
+  })
 }
 
 async function onSave(format: 'png' | 'svg') {
@@ -359,9 +392,9 @@ onMounted(() => {
 [data-editor-code-image] {
   --color-bg-transparent: oklch(50% 0 0);
 
-  .CodeMirror,
-  .CodeMirror-gutters {
-    background-color: var(--color-code-bg-preview) !important;
+  .cm-editor,
+  .cm-gutters {
+    background-color: transparent !important;
   }
 
   .transparent {

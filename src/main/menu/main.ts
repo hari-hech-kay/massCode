@@ -551,7 +551,7 @@ function createEditorMenuItems(context: MainMenuContext): MenuConfig[] {
     })
     items.push({
       label: i18n.t('menu:editor.format'),
-      accelerator: 'Shift+CommandOrControl+F',
+      accelerator: 'Alt+Shift+F',
       click: () => send('main-menu:format'),
     })
     items.push({

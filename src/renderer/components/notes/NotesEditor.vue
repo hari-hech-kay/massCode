@@ -26,6 +26,15 @@ import {
   placeholder,
 } from '@codemirror/view'
 import { GFM, type MarkdownConfig } from '@lezer/markdown'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue'
 import { createClipboardOutput } from './cm-extensions/clipboardOutput'
 import {
   clearInlineFormatting,
